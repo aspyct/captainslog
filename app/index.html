@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset='utf-8'>
+    <meta http-equiv='X-UA-Compatible' content='IE=edge'>
+    <title>Captain's Log</title>
+    <meta name='viewport' content='width=device-width, initial-scale=1'>
+    <link rel='stylesheet' type='text/css' media='screen' href='main.css'>
+</head>
+<body>
+    <h1>Captain's Log</h1>
+    <p>
+        Captain's Log is an encrypted journal for whatever you want to log.
+    </p>
+    <p>
+        Your username cannot be recovered from the files, and the log entries cannot be decrypted without your password.
+    </p>
+    <p>
+        <a href="log.php">Access your log</a>. Use any user/password combination.
+    </p>
+    <h2>Why?</h2>
+    <p>
+        I wanted a simple way to log events like business car trips, refuels,
+        but also more personal topics. I wanted to be able to use it from my
+        computer or smartphone. A web application made sense, but I also
+        like privacy and would not want any of this to become public.
+    </p>
+    <p>
+        Thus was born Captain's Log, a simple interface to keep an encrypted log.
+    </p>
+    <h2>How?</h2>
+    <p>
+        Log entries are encrypted with AES-256-GCM, with a key derived from your password.
+        Your log files are stored in a directory based on the sha512(username, password).
+    </p>
+    <p>
+        For example, a user "John Doe" with password "Oh My Password!" will have the following home directory:
+    </p>
+    <pre>e38fa17aaa4859ee8a4c7a37a09880a4753de681bbc24f6514b648412d967effd64e45e42615803a5f7dc05564bb1076e694e453d06523196536e1f68e111047</pre>
+    <p>
+        You can actually have multiple "John Doe" users in the system, as long as they have a different password.
+    </p>
+    <p>
+        His log entries will be encrypted with a key derived from his password with pbkdf2. Here's a line of that log:
+    </p>
+    <pre>date                      pbkdf2 salt              pbkdf2 iterations  iv               gcm tag                  payload
+2020-03-15T17:52:05+00:00,q9k+elfe5xxKmRrmN75lQQ==,30                ,KSf9ZRymxcFCtz4Q,hTsCn7ZJhp/az4RH9IMZYg==,eFNacVlBTHVKSVNQUjhjPQ==</pre>
+    <p>
+        To decrypt this payload, one would to know John's password, which is never stored on disk by the application. Of course, a good password is still required.
+    </p>
+    <h2>Use only with HTTPS</h2>
+    <p>
+        This application uses HTTP basic auth. This is both good and bad.
+        Good because we are not storing your password on the server at anytime (except in RAM).
+        Bad because this means your password is transmitted across internet every time you make a request.
+    </p>
+    <p>
+        As long as you use HTTPS, this app should be relatively secure.
+    </p>
+    <p>
+        Feel free to <a href="https://github.com/aspyct/captainslog">review the code on github</a>.
+        Please report security issues privately to <a href="mailto:antoine@stellr.be">antoine@stellr.be</a>.
+        Other non-sensitive issues can be submitted on GitHub as usual.
+    </p>
+</body>
+</html>
