@@ -284,7 +284,7 @@ $time_to_decrypt = ($end - $start) / 1000000.0;
                 </tr>
             </thead>
             <tbody>
-            <?php foreach ($decrypted_entries as $entry): [$date, $payload] = $entry ?>
+            <?php foreach (array_reverse($decrypted_entries) as $entry): [$date, $payload] = $entry ?>
                 <tr>
                     <td><?= htmlentities($date) ?></td>
                     <td><?= $payload !== false ? htmlentities($payload) : '<b>Could not decrypt data</b>' ?></td>
