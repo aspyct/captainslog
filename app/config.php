@@ -10,9 +10,6 @@ define('LOG_FILENAME_PATTERN', 'Y-m');
 # Used to salt the sha512 for the user directory. Use any random value
 define('USER_DIR_SALT', 'hello this is some salt');
 
-# What type of cipher is used. To date, only "aes-256-gcm" is supported
-define('CIPHER', 'aes-256-gcm');
-
 # How many iterations to use while deriving the password to an AES key
 define('PBKDF2_ITERATIONS', 10000);
 
