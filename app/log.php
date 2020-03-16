@@ -106,6 +106,14 @@ class Settings {
     }
 }
 
+# NEVER ask for HTTP basic over HTTP-non-S, unless we're in debug mode
+if ((empty($_SERVER['HTTPS']) || $_SERVER['HTTPS'] === 'off') && !empty($_ENV['CAPTAIN_DEBUGGER'])) {
+    die("For security reasons, this app can't be used on HTTP-non-S.");
+}
+
+# Workaround for servers that don't publish the PHP_AUTH_* variables
+list($_SERVER['PHP_AUTH_USER'], $_SERVER['PHP_AUTH_PW']) = explode(':', base64_decode(substr($_SERVER['HTTP_AUTHORIZATION'], 6)));
+
 # Require basic authentication
 if (!isset($_SERVER['PHP_AUTH_USER']) || empty($_SERVER['PHP_AUTH_PW'])) {
     header('WWW-Authenticate: Basic realm="Captain\'s Log"');
