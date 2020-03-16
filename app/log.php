@@ -118,10 +118,12 @@ if ((empty($_SERVER['HTTPS']) || $_SERVER['HTTPS'] === 'off') && !empty($_ENV['C
 }
 
 # Workaround for servers that don't publish the PHP_AUTH_* variables
-list($_SERVER['PHP_AUTH_USER'], $_SERVER['PHP_AUTH_PW']) = explode(':', base64_decode(substr($_SERVER['HTTP_AUTHORIZATION'], 6)));
+if (!isset($_SERVER['PHP_AUTH_USER'])) {
+    [$_SERVER['PHP_AUTH_USER'], $_SERVER['PHP_AUTH_PW']] = explode(':', base64_decode(substr($_SERVER['HTTP_AUTHORIZATION'], 6)));
+}
 
 # Require basic authentication
-if (!isset($_SERVER['PHP_AUTH_USER']) || empty($_SERVER['PHP_AUTH_PW'])) {
+if (!isset($_SERVER['PHP_AUTH_USER']) || empty($_SERVER['PHP_AUTH_USER']) ||  empty($_SERVER['PHP_AUTH_PW'])) {
     header('WWW-Authenticate: Basic realm="Captain\'s Log"');
     header('HTTP/1.0 401 Unauthorized');
     die("401. Please provide your credentials.");
