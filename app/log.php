@@ -71,13 +71,19 @@ class Settings {
     }
 
     public function encrypt($payload, $iv, &$tag) {
-        assert($this->key !== null);
+        $this->require_key();
         return openssl_encrypt($payload, self::CIPHER, $this->key, 0, $iv, $tag);
     }
 
     public function decrypt($payload, $iv, $tag) {
-        assert($this->key !== null);
+        $this->require_key();
         return openssl_decrypt($payload, self::CIPHER, $this->key, 0, $iv, $tag);
+    }
+
+    private function require_key() {
+        if ($this->key === null) {
+            throw new AssertionError("Key should not be null");
+        }
     }
 
     public function to_json() {
