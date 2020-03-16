@@ -65,7 +65,7 @@ class Settings {
     }
 
     public function generate_key($password) {
-        if ($this->key !== null) {
+        if ($this->key === null) {
             $this->key = hash_pbkdf2('sha512', $password, $this->pbkdf2_salt, $this->pbkdf2_iterations);
         }
     }
