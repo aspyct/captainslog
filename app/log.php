@@ -3,6 +3,9 @@ require('config.php');
 require('classes.php');
 
 $output = new HtmlOutput();
+$application_settings = new ApplicationSettings();
+
+$application_settings->set_storage_directory('STORAGE_DIR');
 
 # Verify that the config is correct
 if (!defined('STORAGE_DIR')) {
