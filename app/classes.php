@@ -66,10 +66,26 @@ interface UserHashAlgorithm {
 }
 
 interface Storage {
+    /**
+     * @throw NoSuchUserException
+     */
     function get_last_entry(string $user_hash) : EncryptedLogEntry;
-    function list_entries_in_range(string $user_hash, $from_timestamp, $to_timestamp) : array;
+
+    /**
+     * @throw NoSuchUserException
+     */
+    function list_entries_in_range(string $user_hash, int $from_timestamp_included, int $to_timestamp_excluded) : array;
     function append_entry(string $user_hash, EncryptedLogEntry $entry) : void;
+
+    /**
+     * @throw NoSuchUserException
+     */
+    function entry_count(string $user_hash) : int;
+
+    function delete_all_data(string $user_hash) : void;
 }
+
+class NoSuchUserException extends Exception {}
 
 /**
  * KeyCache
@@ -92,12 +108,12 @@ interface KeyCache {
 class NoSuchKeyException extends Exception {}
 
 interface Crypto {
-    function encrypt(CleartextLogEntry $entry, string $password, string $salt, int $iterations, KeyCache $keyCache) : EncryptedLogEntry;
+    function encrypt(CleartextLogEntry $entry, string $password, string $salt, int $iterations, KeyCache $key_cache) : EncryptedLogEntry;
 
     /**
      * @throw InvalidPasswordException if the provided password is invalid
      */
-    function decrypt(EncryptedLogEntry $entry, string $password, KeyCache $keyCache) : CleartextLogEntry;
+    function decrypt(EncryptedLogEntry $entry, string $password, KeyCache $key_cache) : CleartextLogEntry;
 }
 
 class InvalidPasswordException extends Exception {}
@@ -119,7 +135,7 @@ class NoKeyCache implements KeyCache {
     public function put_key(string $salt, int $iterations, string $key) : void {}
 }
 
-class OneKeyCache implements KeyCache {
+class SingleKeyCache implements KeyCache {
     private $salt;
     private $iterations;
     private $key;
@@ -143,8 +159,8 @@ class OneKeyCache implements KeyCache {
 class Aes256GcmCrypto implements Crypto {
     const CIPHER = 'aes-256-gcm';
 
-    public function encrypt(CleartextLogEntry $entry, string $password, string $salt, int $iterations, KeyCache $keyCache) : EncryptedLogEntry {
-        $key = $this->get_key($password, $salt, $iterations, $keyCache);
+    public function encrypt(CleartextLogEntry $entry, string $password, string $salt, int $iterations, KeyCache $key_cache) : EncryptedLogEntry {
+        $key = $this->get_key($password, $salt, $iterations, $key_cache);
         $iv = random_bytes(openssl_cipher_iv_length(self::CIPHER));
 
         $encrypted_payload = openssl_encrypt($entry->get_payload(), self::CIPHER, $key, $this->get_options(), $iv, $tag);
@@ -162,8 +178,8 @@ class Aes256GcmCrypto implements Crypto {
     /**
      * @throw InvalidPasswordException if the provided password is invalid
      */
-    public function decrypt(EncryptedLogEntry $entry, string $password, KeyCache $keyCache) : CleartextLogEntry {
-        $key = $this->get_key($password, $entry->get_salt(), $entry->get_iterations(), $keyCache);
+    public function decrypt(EncryptedLogEntry $entry, string $password, KeyCache $key_cache) : CleartextLogEntry {
+        $key = $this->get_key($password, $entry->get_salt(), $entry->get_iterations(), $key_cache);
         
         $decrypted_payload = openssl_decrypt(
             $entry->get_payload(),
@@ -173,6 +189,11 @@ class Aes256GcmCrypto implements Crypto {
             $entry->get_iv(),
             $entry->get_tag()
         );
+
+        if ($decrypted_payload === false) {
+            throw new InvalidPasswordException();
+        }
+
 
         return new ImmutableCleartextLogEntry(
             $entry->get_timestamp(),
@@ -199,6 +220,125 @@ class Aes256GcmCrypto implements Crypto {
         }
     }
 }
+
+class Sha256Algorithm implements UserHashAlgorithm {
+    public function hash_username(string $username) : string {
+        return hash('sha256', $username);
+    }
+}
+
+/**
+ * SingleFileStorage
+ * 
+ * A very simple storage that puts everything in a single file for a user.
+ * That will probably not scale too well, but is good to test the features of the app.
+ * 
+ * Please note that no validation is made on the $user_hash, since it is expected
+ * that it will actually be a "filename safe" value.
+ * 
+ * As such, this could potentially read any file on the filesystem.
+ */
+class SingleFileStorage implements Storage {
+    private $directory;
+
+    public function __construct($directory) {
+        $this->directory = $directory;
+    }
+
+    public function get_last_entry(string $user_hash) : EncryptedLogEntry {
+        $all_entries = $this->get_all_entries($user_hash);
+        return $all_entries[count($all_entries) - 1];
+    }
+
+    public function list_entries_in_range(string $user_hash, int $from_timestamp_included, int $to_timestamp_excluded) : array {
+        $all_entries = $this->get_all_entries($user_hash);
+        $matching_entries = [];
+
+        foreach ($all_entries as $log_entry) {
+            $timestamp = $log_entry->get_timestamp();
+
+            if ($timestamp >= $from_timestamp_included && $timestamp < $to_timestamp_excluded) {
+                $matching_entries[] = $log_entry;
+            }
+        }
+
+        return $matching_entries;
+    }
+
+    public function append_entry(string $user_hash, EncryptedLogEntry $entry) : void {
+        $filepath = $this->get_filepath($user_hash);
+        $handle = fopen($filepath, 'a');
+
+        if ($handle === false) {
+            throw new StorageException("Could not open file for writing: $filepath");
+        }
+
+        $csv_array = $this->log_entry_to_csv_array($entry);
+        if (fputcsv($handle, $csv_array) === false) {
+            throw new StorageException("Could not write to file: $filepath");
+        }
+
+        fclose($handle);
+    }
+
+    public function entry_count(string $user_hash) : int {
+        return count($this->get_all_entries($user_hash));
+    }
+    
+    public function delete_all_data(string $user_hash) : void {
+        unlink($this->get_filepath($user_hash));
+    }
+
+    private function get_all_entries(string $user_hash) {
+        $filepath = $this->get_filepath($user_hash);
+
+        if (!is_file($filepath)) {
+            throw new NoSuchUserException();
+        }
+
+        $handle = fopen($filepath, 'r');
+
+        if ($handle === false) {
+            throw new StorageException("Could not open file for reading: $filepath");
+        }
+
+        $all_entries = [];
+        while (($csv_array = fgetcsv($handle)) !== false) {
+            $log_entry = $this->csv_array_to_log_entry($csv_array);
+            $all_entries[] = $log_entry;
+        }
+
+        return $all_entries;
+    }
+
+    private function get_filepath(string $user_hash) {
+        return $this->directory.'/'.$user_hash.'.log';
+    }
+
+    private function log_entry_to_csv_array(EncryptedLogEntry $entry) {
+        return [
+            $entry->get_timestamp(),
+            base64_encode($entry->get_salt()),
+            $entry->get_iterations(),
+            base64_encode($entry->get_iv()),
+            base64_encode($entry->get_tag()),
+            base64_encode($entry->get_payload())
+        ];
+    }
+
+    private function csv_array_to_log_entry(array $csv_array) {
+        return new ImmutableEncryptedLogEntry(
+            intval($csv_array[0]),
+            base64_decode($csv_array[1]),
+            intval($csv_array[2]),
+            base64_decode($csv_array[3]),
+            base64_decode($csv_array[4]),
+            base64_decode($csv_array[5]),
+        );
+    }
+}
+
+class StorageException extends Exception {}
 
 class ImmutableEncryptedLogEntry implements EncryptedLogEntry {
     private $timestamp;
@@ -270,29 +410,29 @@ class ImmutableCleartextLogEntry implements CleartextLogEntry {
 /* Initialize user (username, password, cleartext_payload)
  *
  * $user_hash = $hash_algorithm->hash_username($username);
- * $user_exists = $storage->get_last_entry($user_hash) !== null;
+ * $user_exists = $storage->entry_count($user_hash) > 0;
  * 
  * if ($user_exists) {
  *   die("User already exists");
  * }
  * else {
- *   $keyCache = new InMemoryKeyCache();
+ *   $key_cache = new InMemoryKeyCache();
  *   $salt = random_bytes(PBKDF2_SALT_BYTES);
  *   $iterations = PBKDF2_ITERATIONS;
  *   
  *   $cleartext_entry = new CleartextLogEntry(time(), $user_provided_payload);
- *   $encrypted_entry = $crypto->encrypt($cleartext_entry, $password, $salt, $iterations, $keyCache);
+ *   $encrypted_entry = $crypto->encrypt($cleartext_entry, $password, $salt, $iterations, $key_cache);
  *   $storage->append_entry($user_hash, $encrypted_entry);
  * }
  */
 
 /* Authenticate user (username, password)
  *
- * $keyCache = new InMemoryKeyCache();
+ * $key_cache = new InMemoryKeyCache();
  * $user_hash = $hash_algorithm->hash_username($username);
  * $last_entry = $storage->get_last_entry($user_hash);
  * try {
- *   $crypto->decrypt($last_entry, $password, $keyCache);
+ *   $crypto->decrypt($last_entry, $password, $key_cache);
  *   return true;
  * }
  * catch InvalidPasswordException {
@@ -303,17 +443,17 @@ class ImmutableCleartextLogEntry implements CleartextLogEntry {
  *
  * $last_entry = $storage->get_last_entry($user_hash);
  * $validator->validate_log_entry($cleartext_entry);
- * $keyCache = new InMemoryKeyCache();
- * $new_entry = $crypto->encrypt($cleartext_entry, $password, $last_entry->salt, $last_entry->iterations, $keyCache);
+ * $key_cache = new InMemoryKeyCache();
+ * $new_entry = $crypto->encrypt($cleartext_entry, $password, $last_entry->salt, $last_entry->iterations, $key_cache);
  * $storage->append_entry($user_hash, $new_entry);
  */
 
 /* List log entries for range
  *
  * $entry_list = $storage->list_entries_in_range($user_hash, $from_timestamp, $to_timestamp);
- * $keyCache = new InMemoryKeyCache();
+ * $key_cache = new InMemoryKeyCache();
  * foreach ($entry_list as $log_entry) {
- *   $cleartext_entry = $crypto->decrypt($log_entry, $password, $keyCache);
+ *   $cleartext_entry = $crypto->decrypt($log_entry, $password, $key_cache);
  * }
  */
 
