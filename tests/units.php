@@ -122,13 +122,13 @@ function test_SingleFileStorage() {
     });
 }
 
-function test_Sha256Algorithm() {
-    section("Sha256Algorithm", function() {
-        $algo = new Sha256Algorithm();
-
+function test_SaltySha256Algorithm() {
+    section("SaltySha256Algorithm", function() {
+        $salt = "Captain ";
         $username = "Kathryn Janeway";
-        $expected_hash = "7eeb2c41cce0c1e7a7575d8b3c1fbec4f7d4e8de72ac42f25f201d0893ff44a6";
+        $expected_hash = "c213c371e069bee75c562191d876e72c332f9b738b54ed811dc1e7b80a85f00a";
 
+        $algo = new SaltySha256Algorithm($salt);
         $actual_hash = $algo->hash_username($username);
         assert_true($actual_hash === $expected_hash);
     });
@@ -138,7 +138,7 @@ function test_all() {
     test_assert_functions();
     test_Aes256GcmCrypto();
     test_SingleFileStorage();
-    test_Sha256Algorithm();
+    test_SaltySha256Algorithm();
 }
 
 function section($name, $tests) {
@@ -214,5 +214,5 @@ function test_assert_functions() {
     echo "Basic testing functionalities work. Continuing with the actual tests.\n\n";
 }
 
-require(__DIR__.'/../app/classes.php');
+require_once(__DIR__.'/../app/classes.php');
 test_all();
