@@ -80,7 +80,7 @@ class Aes256GcmCrypto implements Crypto {
     }
 
     private function get_options() {
-        return 0;
+        return OPENSSL_RAW_DATA | OPENSSL_NO_PADDING;
     }
 
     /**
@@ -117,7 +117,7 @@ class SaltySha256Algorithm implements UserHashAlgorithm {
  * A very simple storage that puts everything in a single file for a user.
  * That will probably not scale too well, but is good to test the features of the app.
  * 
- * Please note that no validation is made on the $user_hash, since it is expected
+ * Please note that no validation is made on the $stream_id, since it is expected
  * that it will actually be a "filename safe" value.
  * 
  * As such, this could potentially read any file on the filesystem.
@@ -129,13 +129,17 @@ class SingleFileStorage implements Storage {
         $this->directory = $directory;
     }
 
-    public function get_last_entry(string $user_hash) : EncryptedLogEntry {
-        $all_entries = $this->get_all_entries($user_hash);
+    public function stream_exists(string $stream_id) : bool {
+        return is_file($this->get_filepath($stream_id));
+    }
+
+    public function get_last_entry(string $stream_id) : EncryptedLogEntry {
+        $all_entries = $this->get_all_entries($stream_id);
         return $all_entries[count($all_entries) - 1];
     }
 
-    public function list_entries_in_range(string $user_hash, int $from_timestamp_included, int $to_timestamp_excluded) : array {
-        $all_entries = $this->get_all_entries($user_hash);
+    public function list_entries_in_range(string $stream_id, int $from_timestamp_included, int $to_timestamp_excluded) : array {
+        $all_entries = $this->get_all_entries($stream_id);
         $matching_entries = [];
 
         foreach ($all_entries as $log_entry) {
@@ -149,8 +153,8 @@ class SingleFileStorage implements Storage {
         return $matching_entries;
     }
 
-    public function append_entry(string $user_hash, EncryptedLogEntry $entry) : void {
-        $filepath = $this->get_filepath($user_hash);
+    public function append_entry(string $stream_id, EncryptedLogEntry $entry) : void {
+        $filepath = $this->get_filepath($stream_id);
         $handle = fopen($filepath, 'a');
 
         if ($handle === false) {
@@ -165,16 +169,16 @@ class SingleFileStorage implements Storage {
         fclose($handle);
     }
 
-    public function entry_count(string $user_hash) : int {
-        return count($this->get_all_entries($user_hash));
+    public function entry_count(string $stream_id) : int {
+        return count($this->get_all_entries($stream_id));
     }
     
-    public function delete_all_data(string $user_hash) : void {
-        unlink($this->get_filepath($user_hash));
+    public function delete_all_data(string $stream_id) : void {
+        unlink($this->get_filepath($stream_id));
     }
 
-    private function get_all_entries(string $user_hash) {
-        $filepath = $this->get_filepath($user_hash);
+    private function get_all_entries(string $stream_id) {
+        $filepath = $this->get_filepath($stream_id);
 
         if (!is_file($filepath)) {
             throw new NoSuchUserException();
@@ -195,8 +199,8 @@ class SingleFileStorage implements Storage {
         return $all_entries;
     }
 
-    private function get_filepath(string $user_hash) {
-        return $this->directory.'/'.$user_hash.'.log';
+    private function get_filepath(string $stream_id) {
+        return $this->directory.'/'.$stream_id.'.log';
     }
 
     private function log_entry_to_csv_array(EncryptedLogEntry $entry) {
@@ -291,50 +295,89 @@ class ImmutableCleartextLogEntry implements CleartextLogEntry {
     }
 }
 
-/* Initialize user (username, password, cleartext_payload)
- *
- * $user_hash = $hash_algorithm->hash_username($username);
- * $user_exists = $storage->entry_count($user_hash) > 0;
- * 
- * if ($user_exists) {
- *   die("User already exists");
- * }
- * else {
- *   $key_cache = new InMemoryKeyCache();
- *   $salt = random_bytes(PBKDF2_SALT_BYTES);
- *   $iterations = PBKDF2_ITERATIONS;
- *   
- *   $cleartext_entry = new CleartextLogEntry(time(), $user_provided_payload);
- *   $encrypted_entry = $crypto->encrypt($cleartext_entry, $password, $salt, $iterations, $key_cache);
- *   $storage->append_entry($user_hash, $encrypted_entry);
- * }
- */
+class DefaultChoreographer implements Choreographer {
+    private $hash;
+    private $crypto;
+    private $storage;
+    
+    const PBKDF2_SALT_BYTES = 16;
+    const PBKDF2_ITERATIONS = 100000;
 
-/* Authenticate user (username, password)
- *
- * $key_cache = new InMemoryKeyCache();
- * $user_hash = $hash_algorithm->hash_username($username);
- * $last_entry = $storage->get_last_entry($user_hash);
- * try {
- *   $crypto->decrypt($last_entry, $password, $key_cache);
- *   return true;
- * }
- * catch InvalidPasswordException {
- *   return false;
- * }
+    public function __construct(Crypto $crypto, Storage $storage, UserHashAlgorithm $hash) {
+        $this->crypto = $crypto;
+        $this->storage = $storage;
+        $this->hash = $hash;
+    }
+
+    function initialize_user(string $username, string $password, string $payload, KeyCache $key_cache) : void {
+        $stream_id = $this->hash->hash_username($username);
+
+        if ($this->storage->user_exists($stream_id)) {
+            throw new UserAlreadyExistsException();
+        }
+
+        $salt = random_bytes(self::PBKDF2_SALT_BYTES);
+        $iterations = self::PBKDF2_ITERATIONS;
+
+        $log_entry = new ImmutableCleartextLogEntry(time(), $payload);
+        $encrypted_entry = $this->crypto->encrypt($log_entry, $password, $salt, $iterations, $key_cache);
+        $this->storage->append_entry($stream_id, $encrypted_entry);
+    }
+
+    function authenticate(string $username, string $password, KeyCache $key_cache) { 
+        $stream_id = $this->hash->hash_username($username);
+        $last_entry = $this->storage->get_last_entry($stream_id);
+
+        try {
+            $this->crypto->decrypt($last_entry, $password, $key_cache);
+            return true;
+        }
+        catch (InvalidPasswordException $_) {
+            return false;
+        }
+    }
+
+    function append_log_entry(string $username, string $password, int $timestamp, string $payload, KeyCache $key_cache) : void {
+        $stream_id = $this->hash->hash_username($username);
+        $last_entry = $this->storage->get_last_entry($stream_id);
+
+        $cleartext_entry = new ImmutableCleartextLogEntry($timestamp, $payload);
+        $encrypted_entry = $this->crypto->encrypt(
+            $cleartext_entry,
+            $password,
+            $last_entry->get_salt(),
+            $last_entry->get_iterations(),
+            $key_cache
+        );
+        
+        $this->storage->append_entry($stream_id, $encrypted_entry);
+    }
+
+    function list_log_entries(string $username, string $password, int $from_timestamp_included, int $to_timestamp_excluded, KeyCache $key_cache) : array {
+        $stream_id = $this->hash->hash_username($username);
+        $entries = $storage->list_entries_in_range($stream_id, $from_timestamp_included, $to_timestamp_excluded);
+
+        $decrypted_entries = [];
+        foreach ($entries as $encrypted_entry) {
+            $decrypted_entries[] = $this->crypto->decrypt($encrypted_entry, $password);
+        }
+
+        return $decrypted_entries;
+    }
+}
 
 /* Append log entry
  *
- * $last_entry = $storage->get_last_entry($user_hash);
+ * $last_entry = $storage->get_last_entry($stream_id);
  * $validator->validate_log_entry($cleartext_entry);
  * $key_cache = new InMemoryKeyCache();
  * $new_entry = $crypto->encrypt($cleartext_entry, $password, $last_entry->salt, $last_entry->iterations, $key_cache);
- * $storage->append_entry($user_hash, $new_entry);
+ * $storage->append_entry($stream_id, $new_entry);
  */
 
 /* List log entries for range
  *
- * $entry_list = $storage->list_entries_in_range($user_hash, $from_timestamp, $to_timestamp);
+ * $entry_list = $storage->list_entries_in_range($stream_id, $from_timestamp, $to_timestamp);
  * $key_cache = new InMemoryKeyCache();
  * foreach ($entry_list as $log_entry) {
  *   $cleartext_entry = $crypto->decrypt($log_entry, $password, $key_cache);
@@ -457,10 +500,10 @@ class User {
 
     public function __construct(string $name) {
         # Derive the user/password to find out the user's home directory
-        $user_hash = hash('sha512', $name.':'.USER_DIR_SALT);
+        $stream_id = hash('sha512', $name.':'.USER_DIR_SALT);
 
         # This is safe, because the hash can only contain alphanumeric characters
-        $this->directory = STORAGE_DIR.'/'.$user_hash;
+        $this->directory = STORAGE_DIR.'/'.$stream_id;
     }
 
     public function authenticate(string $password) {

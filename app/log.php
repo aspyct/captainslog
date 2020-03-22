@@ -62,11 +62,22 @@ if (!isset($_SERVER['PHP_AUTH_USER']) || empty($_SERVER['PHP_AUTH_USER']) ||  em
     $output->die("401. Please provide your credentials.");
 }
 
+$storage = new SingleFileStorage(STORAGE_DIR);
+$crypto = new Aes256GcmCrypto();
+$hash = new SaltySha256Algorithm(USER_SALT);
+$key_cache = new SingleKeyCache();
+$choreographer = new DefaultChoreographer($crypto, $storage, $hash);
+
+$username = $_SERVER['PHP_AUTH_USER'];
+$password = $_SERVER['PHP_AUTH_PW'];
+
+
+
 # Derive the user/password to find out the user's home directory
-$user_hash = hash('sha512', $_SERVER['PHP_AUTH_USER'].':'.USER_DIR_SALT);
+$stream_id = hash('sha512', $_SERVER['PHP_AUTH_USER'].':'.USER_DIR_SALT);
 
 # This is safe, because the hash can only contain alphanumeric characters
-$user_dir = STORAGE_DIR.'/'.$user_hash;
+$user_dir = STORAGE_DIR.'/'.$stream_id;
 $user_settings_file = $user_dir.'/'.USER_SETTINGS_FILE;
 
 # The permission system is very simple.

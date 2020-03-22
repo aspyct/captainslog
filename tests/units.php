@@ -32,7 +32,7 @@ function test_SingleFileStorage() {
     section("SingleFileStorage", function() {
         $storage = new SingleFileStorage("/tmp");
 
-        $user_hash = sha1("valid_filename");
+        $stream_id = sha1("valid_filename");
         $entry = new ImmutableEncryptedLogEntry(
             time(),
             "some salt",
@@ -43,23 +43,26 @@ function test_SingleFileStorage() {
         );
 
         try {
-            assert_throws('NoSuchUserException', function() use ($storage, $user_hash) {
-                $storage->entry_count($user_hash);
+            assert_true(false === $storage->user_exists($stream_id));
+
+            assert_throws('NoSuchUserException', function() use ($storage, $stream_id) {
+                $storage->entry_count($stream_id);
             });
 
-            assert_throws('NoSuchUserException', function() use ($storage, $user_hash) {
-                $storage->get_last_entry($user_hash);
+            assert_throws('NoSuchUserException', function() use ($storage, $stream_id) {
+                $storage->get_last_entry($stream_id);
             });
 
-            assert_throws('NoSuchUserException', function() use ($storage, $user_hash) {
-                $storage->list_entries_in_range($user_hash, 0, time());
+            assert_throws('NoSuchUserException', function() use ($storage, $stream_id) {
+                $storage->list_entries_in_range($stream_id, 0, time());
             });
 
-            $storage->append_entry($user_hash, $entry);
+            $storage->append_entry($stream_id, $entry);
 
-            assert_true(1 === $storage->entry_count($user_hash));
+            assert_true($storage->user_exists($stream_id));
+            assert_true(1 === $storage->entry_count($stream_id));
 
-            $recovered_entry = $storage->get_last_entry($user_hash);
+            $recovered_entry = $storage->get_last_entry($stream_id);
 
             assert_true($entry->get_timestamp() === $recovered_entry->get_timestamp());
             assert_true($entry->get_salt() === $recovered_entry->get_salt());
@@ -77,16 +80,16 @@ function test_SingleFileStorage() {
                 "some payload"
             );
 
-            $storage->append_entry($user_hash, $second_entry);
+            $storage->append_entry($stream_id, $second_entry);
 
-            assert_true(2 === $storage->entry_count($user_hash));
+            assert_true(2 === $storage->entry_count($stream_id));
 
-            $recovered_second_entry = $storage->get_last_entry($user_hash);
+            $recovered_second_entry = $storage->get_last_entry($stream_id);
 
             assert_true($second_entry->get_timestamp() === $recovered_second_entry->get_timestamp());
 
             $entry_list = $storage->list_entries_in_range(
-                $user_hash,
+                $stream_id,
                 $entry->get_timestamp(), // included
                 $second_entry->get_timestamp() + 1 // excluded
             );
@@ -96,7 +99,7 @@ function test_SingleFileStorage() {
             assert_true($entry_list[1]->get_timestamp() === $second_entry->get_timestamp());
 
             $entry_list = $storage->list_entries_in_range(
-                $user_hash,
+                $stream_id,
                 $entry->get_timestamp(), // included
                 $second_entry->get_timestamp() // excluded
             );
@@ -105,7 +108,7 @@ function test_SingleFileStorage() {
             assert_true($entry->get_timestamp() === $entry_list[0]->get_timestamp());
 
             $entry_list = $storage->list_entries_in_range(
-                $user_hash,
+                $stream_id,
                 $entry->get_timestamp() + 1,
                 $second_entry->get_timestamp() + 1
             );
@@ -114,10 +117,11 @@ function test_SingleFileStorage() {
             assert_true($second_entry->get_timestamp() === $entry_list[0]->get_timestamp());
         }
         finally {
-            $storage->delete_all_data($user_hash);
-            assert_throws('NoSuchUserException', function() use($storage, $user_hash) {
-                $storage->entry_count($user_hash);
+            $storage->delete_all_data($stream_id);
+            assert_throws('NoSuchUserException', function() use($storage, $stream_id) {
+                $storage->entry_count($stream_id);
             });
+            assert_true(false === $storage->user_exists($stream_id));
         }
     });
 }

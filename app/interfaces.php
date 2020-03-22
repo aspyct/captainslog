@@ -5,11 +5,16 @@
  * Handles the heavy lifting for user-facing operations.
  */
 interface Choreographer {
-    function initialize_user(string $username) : void;
-    function authenticate(string $username, string $password);
-    function append_log_entry(string $username, string $password, int $timestamp, string $payload) : void;
-    function list_log_entries(string $username, string $password, int $from_timestamp_included, int $to_timestamp_excluded) : array;
+    /**
+     * @throw UserAlreadyExistsException
+     */
+    function initialize_user(string $username, string $password, string $payload, KeyCache $key_cache) : void;
+    function authenticate(string $username, string $password, KeyCache $key_cache);
+    function append_log_entry(string $username, string $password, int $timestamp, string $payload, KeyCache $key_cache) : void;
+    function list_log_entries(string $username, string $password, int $from_timestamp_included, int $to_timestamp_excluded, KeyCache $key_cache) : array;
 }
+
+class UserAlreadyExistsException extends Exception {}
 
 /**
  * EncryptedLogEntry
@@ -78,23 +83,25 @@ interface UserHashAlgorithm {
 }
 
 interface Storage {
-    /**
-     * @throw NoSuchUserException
-     */
-    function get_last_entry(string $user_hash) : EncryptedLogEntry;
+    function stream_exists(string $stream_id) : bool;
 
     /**
      * @throw NoSuchUserException
      */
-    function list_entries_in_range(string $user_hash, int $from_timestamp_included, int $to_timestamp_excluded) : array;
-    function append_entry(string $user_hash, EncryptedLogEntry $entry) : void;
+    function get_last_entry(string $stream_id) : EncryptedLogEntry;
 
     /**
      * @throw NoSuchUserException
      */
-    function entry_count(string $user_hash) : int;
+    function list_entries_in_range(string $stream_id, int $from_timestamp_included, int $to_timestamp_excluded) : array;
+    function append_entry(string $stream_id, EncryptedLogEntry $entry) : void;
 
-    function delete_all_data(string $user_hash) : void;
+    /**
+     * @throw NoSuchUserException
+     */
+    function entry_count(string $stream_id) : int;
+
+    function delete_all_data(string $stream_id) : void;
 }
 
 class NoSuchUserException extends Exception {}
@@ -133,4 +140,19 @@ class InvalidPasswordException extends Exception {}
 interface Output {
     function die(string $message, int $code = 0);
     function display_log_entries(array $entries);
+}
+
+interface Resource {
+    function do_get(array $untrusted_urlparams, array $untrusted_get);
+    function do_post(array $untrusted_urlparams, array $untrusted_get, array $untrusted_post);
+    function do_delete(array $untrusted_urlparams, array $untrusted_get);
+    function do_put(array $untrusted_urlparams, array $untrusted_get, array $untrusted_post);
+}
+
+interface Middleware {
+    function before_handler();
+}
+
+interface Application {
+    function serve($server, $untrusted_get, $untrusted_post);
 }

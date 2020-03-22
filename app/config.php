@@ -2,13 +2,9 @@
 # The storage directory should not be publicly accessible
 # If this directory is writeable, the app will be able to enroll new users.
 # If the directory is unwriteable, only previously created users will be able to access the app.
-define('STORAGE_DIR', '../storage');
+define('STORAGE_DIR', __DIR__.'/../storage');
 
-# The date pattern used to generate the filename
-define('LOG_FILENAME_PATTERN', 'Y-m');
-
-# Used to salt the sha512 for the user directory. Use any random value
-define('USER_DIR_SALT', 'hello this is some salt');
+define('USERNAME_SALT', )
 
 # How many iterations to use while deriving the password to an AES key
 define('PBKDF2_ITERATIONS', 10000);
